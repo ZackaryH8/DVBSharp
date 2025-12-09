@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.21" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DVBSharp.Tuner\DVBSharp.Tuner.csproj" />
+    <ProjectReference Include="..\DVBSharp.Core\DVBSharp.Core.csproj" />
+    <ProjectReference Include="..\DVBSharp.Geo\DVBSharp.Geo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="HdHomeRun\Templates\*.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
