@@ -4,11 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { MuxScanForm } from "@/components/mux-scan-form";
-import { getMuxes } from "@/lib/api";
+import { PredefinedMuxBrowser } from "@/components/predefined-mux-browser";
+import { getMuxes, getPredefinedMuxes } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 
 export default async function MuxesPage() {
-  const muxes = await getMuxes().catch(() => []);
+  const [muxes, predefined] = await Promise.all([
+    getMuxes().catch(() => []),
+    getPredefinedMuxes().catch(() => []),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -67,6 +71,18 @@ export default async function MuxesPage() {
 
         <MuxScanForm />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Predefined UK mux library</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Data sourced from the tvheadend/dtv-scan-tables project for quick reference.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <PredefinedMuxBrowser locations={predefined} />
+        </CardContent>
+      </Card>
     </div>
   );
 }

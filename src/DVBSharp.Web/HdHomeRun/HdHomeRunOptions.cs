@@ -10,4 +10,5 @@ public sealed class HdHomeRunOptions
     public string ModelNumber { get; set; } = "HDHR5-4DT";
     public string Manufacturer { get; set; } = "DVBSharp";
     public string SourceType { get; set; } = "Antenna";
+    public int? TunerLimit { get; set; } = 4;
 }

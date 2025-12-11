@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { CopyButton } from "@/components/copy-button";
+import { HdHomeRunLimitForm } from "@/components/hdhomerun-limit-form";
 import { getChannelSummary, getChannels, getHdHomeRunInfo } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { ChannelSummary, HdHomeRunInfo } from "@/lib/types";
@@ -166,11 +167,13 @@ function HdHomeRunPanel({ info }: { info: HdHomeRunInfo }) {
         </p>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-4">
           <Stat label="Device" value={info.friendlyName} />
-          <Stat label="Tuners" value={info.tunerCount.toString()} />
+          <Stat label="Advertised tuners" value={info.tunerCount.toString()} />
+          <Stat label="Physical tuners" value={(info.physicalTuners ?? info.tunerCount).toString()} />
           <Stat label="Channels in lineup" value={info.channelCount.toString()} />
         </div>
+        <HdHomeRunLimitForm initialLimit={info.tunerLimit ?? undefined} />
 
         <div className="space-y-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -211,45 +214,6 @@ function HdHomeRunPanel({ info }: { info: HdHomeRunInfo }) {
           </Table>
         </div>
 
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Lineup preview</p>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Guide #</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Stream URL</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {info.lineupPreview.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
-                    No channels available. Scan muxes to populate the lineup.
-                  </TableCell>
-                </TableRow>
-              )}
-              {info.lineupPreview.map((channel) => (
-                <TableRow key={`${channel.guideNumber}-${channel.guideName}`}>
-                  <TableCell>{channel.guideNumber}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-col">
-                      <span className="font-medium">{channel.guideName}</span>
-                      {channel.callSign && (
-                        <span className="text-xs text-muted-foreground">{channel.callSign}</span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>{channel.category ?? "—"}</TableCell>
-                  <TableCell className="text-xs">
-                    <code className="rounded bg-muted px-2 py-1">{channel.url}</code>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
       </CardContent>
     </Card>
   );

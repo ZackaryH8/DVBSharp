@@ -7,7 +7,6 @@ const links = [
   { href: "/tuners", label: "Tuners" },
   { href: "/muxes", label: "Muxes" },
   { href: "/channels", label: "Channels" },
-  { href: "/transmitters", label: "Transmitters" },
   { href: "/discovery", label: "Discovery" },
 ];
 

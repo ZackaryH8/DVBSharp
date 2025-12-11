@@ -67,6 +67,28 @@ export type Mux = {
   services: Service[];
 };
 
+export type PredefinedMux = {
+  name: string;
+  frequency: number;
+  bandwidthHz: number;
+  deliverySystem: string;
+  modulation?: string;
+  transmissionMode?: string;
+  guardInterval?: string;
+  codeRateHp?: string;
+  codeRateLp?: string;
+  streamId?: string;
+};
+
+export type PredefinedMuxLocation = {
+  id: string;
+  name: string;
+  country?: string;
+  provider?: string;
+  sourceDate?: string;
+  muxes: PredefinedMux[];
+};
+
 export type Channel = {
   muxId: string;
   frequency: number;
@@ -103,14 +125,6 @@ export type HdHomeRunEndpointInfo = {
   streamAny: string;
 };
 
-export type HdHomeRunLineupPreview = {
-  guideNumber: string;
-  guideName: string;
-  url: string;
-  callSign?: string;
-  category?: string;
-};
-
 export type HdHomeRunInfo = {
   friendlyName: string;
   deviceId: string;
@@ -121,44 +135,22 @@ export type HdHomeRunInfo = {
   firmwareVersion: string;
   sourceType: string;
   tunerCount: number;
+  physicalTuners: number;
+  tunerLimit?: number | null;
   channelCount: number;
   baseUrl: string;
   endpoints: HdHomeRunEndpointInfo;
-  lineupPreview: HdHomeRunLineupPreview[];
 };
 
-export type TransmitterMux = {
-  name: string;
-  uhfChannel?: number;
-  frequencyMHz?: number;
-  erpKW?: number;
+export type HdHomeRunSettings = {
+  tunerLimit?: number | null;
 };
 
-export type Transmitter = {
-  siteName: string;
-  postcode?: string;
-  region?: string;
-  latitude: number;
-  longitude: number;
-  isRelay: boolean;
-  muxes: TransmitterMux[];
-};
-
-export type TransmitterPage = {
-  items: Transmitter[];
-  total: number;
-  skip: number;
-  take: number;
-};
-
-export type NearestTransmitter = Transmitter & {
-  distanceKm: number;
-};
-
-export type PostcodeLookupResult = {
-  postcode: string;
-  lat: number;
-  lon: number;
-  transmitter: string;
-  distanceKm: number;
+export type ActiveStream = {
+  id: string;
+  tunerId: string;
+  frequency?: number;
+  label?: string;
+  client?: string;
+  startedAt: string;
 };

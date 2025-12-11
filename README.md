@@ -4,7 +4,7 @@
 <img src="docs/logo.png" width="150" />
 
 DVBSharp is a next-generation digital TV backend designed as a clean, modular, and performant alternative to legacy systems like TVHeadend.  
-It is built in **C# / .NET 8**, designed to integrate with **Next.js frontends**, and engineered to support **DVB-T/T2 tuners**, **IPTV sources**, **SAT>IP**, and **NVIDIA NVENC transcoding**.
+It is built in **C# / .NET 8**, designed to integrate with **Next.js frontends**, and engineered to support **DVB-T/T2 tuners**, **IPTV sources**, and **SAT>IP**.
 
 ---
 
@@ -39,6 +39,7 @@ It is built in **C# / .NET 8**, designed to integrate with **Next.js frontends**
 - Low latency  
 - Multiple clients  
 - Planned: WebSocket stats + HLS output
+- Active stream tracking with client attribution + tuner pinning awareness
 
 ### 📡 HDHomeRun Emulation
 - `/discover.json`, `/lineup_status.json`, `/lineup.json`, `/lineup.post` endpoints
@@ -47,12 +48,6 @@ It is built in **C# / .NET 8**, designed to integrate with **Next.js frontends**
 - Works with any registered tuner or the automatic `/api/stream/any` endpoint
 - Client-friendly channel metadata (LCN, name, category)
 - Optional dev transport override – set `Streaming:TestTransportPath` (defaults to `test.ts` at the repo root) to loop a canned MPEG-TS over every channel/stream for testing
-
-### ⚡ NVIDIA NVENC Support
-- GPU-accelerated transcoding via FFmpeg NVENC  
-- H.264 / H.265 streaming  
-- Live re-encoding pipeline  
-- Lightweight Docker builds with GPU support  
 
 ### 🌐 Modern API
 - Clean REST API (JSON)  
@@ -96,7 +91,12 @@ Place the section in `appsettings.json` (or user secrets) inside `DVBSharp.Web`.
 - The fake tuner also produces MPEG-TS-like packets so client players can open the stream endpoints without needing physical hardware.
 - Plex / Jellyfin setup tip: point the client at `http(s)://<host>:<port>` and it will fetch `/discover.json`, `/device.xml`, `/lineup_status.json`, and `/lineup.json` just like the [antennas HDHomeRun emulator](https://github.com/jfarseneau/antennas/). Use `/api/integrations/hdhomerun` (UI panel) to copy-paste the exact URLs.
 
+## 🔌 Real Hardware Mode
+- Set `Tuners:UseFakeProvider` to `false` (or export `Tuners__UseFakeProvider=false`) to force DVBSharp to load your physical DVB adapter even when running in the `Development` environment.
+- Leave the setting unset/`true` to keep using the Cambridge emulator for UI testing without hardware.
+
 ## 🔍 Discovery & Pinning
 - Visit the new **Discovery** page in the Next.js UI to pin any registered tuner to a specific mux frequency.
 - Pins are persisted (`data/tuner_assignments.json`) and replayed on startup, ensuring tuners never hop to the wrong mux during HDHomeRun requests.
 - The `/api/stream` endpoints honor pins—attempting to tune a pinned tuner to a different mux returns a descriptive error.
+- The dashboard now shows a live stream table, so you can see which muxes/tuners are active, who requested them, and when they started.

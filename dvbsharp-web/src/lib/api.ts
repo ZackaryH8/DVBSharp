@@ -1,11 +1,11 @@
 import {
+  ActiveStream,
   Channel,
   ChannelSummary,
   HdHomeRunInfo,
+  HdHomeRunSettings,
   Mux,
-  NearestTransmitter,
-  PostcodeLookupResult,
-  TransmitterPage,
+  PredefinedMuxLocation,
   TunerAssignment,
   TunerListItem,
   TunerWithStatus,
@@ -38,6 +38,8 @@ export const getTuner = (id: string) => api<TunerWithStatus>(`/tuners/${id}`);
 
 export const getMuxes = () => api<Mux[]>("/muxes");
 
+export const getPredefinedMuxes = () => api<PredefinedMuxLocation[]>("/muxes/predefined");
+
 export const getChannels = () => api<Channel[]>("/channels");
 
 export const getChannelSummary = () => api<ChannelSummary>("/channels/summary");
@@ -51,6 +53,13 @@ export const scanMux = (frequency: number) =>
 
 export const getHdHomeRunInfo = () =>
   api<HdHomeRunInfo>("/integrations/hdhomerun");
+
+export const updateHdHomeRunSettings = (payload: HdHomeRunSettings) =>
+  api<HdHomeRunSettings>("/integrations/hdhomerun/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 
 export const getTunerAssignments = () =>
   api<TunerAssignment[]>("/tuner-assignments");
@@ -67,19 +76,5 @@ export const unassignTuner = (tunerId: string) =>
     method: "DELETE",
   });
 
-export const getTransmitters = (skip = 0, take = 25) =>
-  api<TransmitterPage>(`/transmitters?skip=${skip}&take=${take}`);
-
-export const getNearestTransmitters = (lat: number, lon: number) =>
-  api<NearestTransmitter[]>("/transmitters/nearest", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ lat, lon }),
-  });
-
-export const lookupTransmitterByPostcode = (postcode: string) =>
-  api<PostcodeLookupResult>("/transmitters/from-postcode", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ postcode }),
-  });
+export const getActiveStreams = () =>
+  api<ActiveStream[]>("/streams/active");

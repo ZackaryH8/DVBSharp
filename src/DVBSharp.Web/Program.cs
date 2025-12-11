@@ -1,14 +1,14 @@
 using System.Linq;
 using System.Text.Json;
 using DVBSharp.Core;
-using DVBSharp.Geo;
 using DVBSharp.Tuner;
+using Microsoft.AspNetCore.Mvc;
 using DVBSharp.Tuner.Emulation;
 using DVBSharp.Tuner.Linux;
 using DVBSharp.Tuner.Models;
-using DVBSharp.Tuner.Transmitters;
 using DVBSharp.Web;
 using DVBSharp.Web.HdHomeRun;
+using DVBSharp.Web.PredefinedMuxes;
 using DVBSharp.Web.Requests;
 using Microsoft.Extensions.Options;
 
@@ -38,13 +38,25 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddSingleton<ITunerProvider, DvbTunerProvider>();
-if (builder.Environment.IsDevelopment())
+var useFakeTuners = builder.Configuration.GetSection("Tuners").GetValue<bool?>("UseFakeProvider");
+if (useFakeTuners == true)
 {
     builder.Services.AddSingleton<ITunerProvider, FakeCambridgeTunerProvider>();
 }
+else if (useFakeTuners == false)
+{
+    builder.Services.AddSingleton<ITunerProvider, DvbTunerProvider>();
+}
+else if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSingleton<ITunerProvider, FakeCambridgeTunerProvider>();
+}
+else
+{
+    builder.Services.AddSingleton<ITunerProvider, DvbTunerProvider>();
+}
 builder.Services.AddSingleton<TunerManager>();
-var dataRoot = Path.Combine(builder.Environment.ContentRootPath, "data");
+builder.Services.AddSingleton<ActiveStreamManager>();
 
 builder.Services.AddSingleton<MuxManager>(sp =>
 {
@@ -54,13 +66,11 @@ builder.Services.AddSingleton<MuxManager>(sp =>
 });
 
 builder.Services.AddSingleton<FakeMuxScanner>();
-builder.Services.AddSingleton(new TransmitterDatabase(
-    Path.Combine(dataRoot, "uk-ofcom-tv-transmitting-stations.csv"),
-    Path.Combine(dataRoot, "uk_transmitters.json")));
-builder.Services.AddSingleton<PostcodeLookup>();
 builder.Services.Configure<HdHomeRunOptions>(builder.Configuration.GetSection("HdHomeRun"));
 builder.Services.AddSingleton<HdHomeRunLineupService>();
 builder.Services.AddSingleton<HdHomeRunXmlTemplateProvider>();
+builder.Services.AddSingleton<HdHomeRunSettingsStore>();
+builder.Services.AddSingleton<PredefinedMuxRepository>();
 builder.Services.AddSingleton<TunerAssignmentManager>(sp =>
 {
     var env = sp.GetRequiredService<IWebHostEnvironment>();
@@ -125,7 +135,7 @@ app.MapGet("/api/tuners/{id}", async (string id, TunerManager manager) =>
     return ApiResponse.Ok(new { tuner.Info, Status = status }).ToHttpResult();
 });
 
-app.MapGet("/api/stream/{id}", async (string id, HttpContext ctx, TunerManager manager, IOptions<StreamingOptions> streamingOptions, ILoggerFactory loggerFactory, TunerAssignmentManager assignmentManager, int? frequency) =>
+app.MapGet("/api/stream/{id}", async (string id, HttpContext ctx, TunerManager manager, IOptions<StreamingOptions> streamingOptions, ILoggerFactory loggerFactory, TunerAssignmentManager assignmentManager, [FromServices] ActiveStreamManager streamManager, int? frequency) =>
 {
     var tuner = manager.GetTuner(id);
     if (tuner is null)
@@ -147,10 +157,10 @@ app.MapGet("/api/stream/{id}", async (string id, HttpContext ctx, TunerManager m
         frequency = assignment.Frequency;
     }
 
-    return await StreamFromTunerAsync(tuner, ctx, frequency, streamingOptions.Value, logger);
+    return await StreamFromTunerAsync(tuner, ctx, frequency, streamingOptions.Value, logger, streamManager, assignment?.Label);
 });
 
-app.MapGet("/api/stream/any", async (HttpContext ctx, TunerManager manager, IOptions<StreamingOptions> streamingOptions, ILoggerFactory loggerFactory, TunerAssignmentManager assignmentManager, int frequency) =>
+app.MapGet("/api/stream/any", async (HttpContext ctx, TunerManager manager, IOptions<StreamingOptions> streamingOptions, ILoggerFactory loggerFactory, TunerAssignmentManager assignmentManager, [FromServices] ActiveStreamManager streamManager, int frequency) =>
 {
     if (frequency <= 0)
     {
@@ -166,7 +176,7 @@ app.MapGet("/api/stream/any", async (HttpContext ctx, TunerManager manager, IOpt
     var logger = loggerFactory.CreateLogger("Streaming");
     logger.LogDebug("Streaming request via /any using tuner {TunerId} at frequency {Frequency} Hz", tuner.Id, frequency);
 
-    return await StreamFromTunerAsync(tuner, ctx, frequency, streamingOptions.Value, logger);
+    return await StreamFromTunerAsync(tuner, ctx, frequency, streamingOptions.Value, logger, streamManager);
 });
 
 app.MapGet("/api/muxes", (MuxManager muxManager) =>
@@ -180,6 +190,19 @@ app.MapGet("/api/muxes/{id}", (string id, MuxManager muxManager) =>
     return mux is null
         ? ApiResponse<Mux>.Fail("Mux not found").ToHttpResult()
         : ApiResponse.Ok(mux).ToHttpResult();
+});
+
+app.MapGet("/api/muxes/predefined", (PredefinedMuxRepository repository) =>
+{
+    return ApiResponse.Ok(repository.GetLocations()).ToHttpResult();
+});
+
+app.MapGet("/api/muxes/predefined/{id}", (string id, PredefinedMuxRepository repository) =>
+{
+    var location = repository.GetLocation(id);
+    return location is null
+        ? ApiResponse<PredefinedMuxLocation>.Fail("Predefined mux location not found").ToHttpResult()
+        : ApiResponse.Ok(location).ToHttpResult();
 });
 
 app.MapPost("/api/muxes/scan", async (MuxScanRequest request, FakeMuxScanner scanner) =>
@@ -266,11 +289,12 @@ app.MapGet("/ConnectionManager.xml", (HdHomeRunXmlTemplateProvider templates) =>
 app.MapGet("/ContentDirectory.xml", (HdHomeRunXmlTemplateProvider templates) =>
     Results.Content(templates.GetContentDirectoryXml(), "application/xml"));
 
-app.MapGet("/discover.json", (HttpContext ctx, IOptions<HdHomeRunOptions> options, TunerManager manager) =>
+app.MapGet("/discover.json", (HttpContext ctx, IOptions<HdHomeRunOptions> options, TunerManager manager, HdHomeRunSettingsStore settings) =>
 {
     var opts = options.Value;
     var tuners = manager.GetTuners().ToList();
     var baseUrl = ResolveBaseUrl(ctx.Request);
+    var advertisedTuners = settings.ApplyLimit(tuners.Count);
 
     var payload = new
     {
@@ -280,7 +304,7 @@ app.MapGet("/discover.json", (HttpContext ctx, IOptions<HdHomeRunOptions> option
         ModelNumber = opts.ModelNumber,
         FirmwareName = opts.FirmwareName,
         FirmwareVersion = opts.FirmwareVersion,
-        TunerCount = tuners.Count,
+        TunerCount = advertisedTuners,
         DeviceID = opts.DeviceId,
         DeviceAuth = opts.DeviceAuth,
         BaseURL = baseUrl,
@@ -335,13 +359,15 @@ app.MapPost("/lineup.post", (HttpContext ctx, ILogger<HdHomeRunLineupService> lo
     return Results.Json(new { Result = "success" }, hdHomeRunJsonOptions);
 });
 
-app.MapGet("/api/integrations/hdhomerun", (HttpContext ctx, IOptions<HdHomeRunOptions> options, TunerManager manager, HdHomeRunLineupService lineupService) =>
+app.MapGet("/api/integrations/hdhomerun", (HttpContext ctx, IOptions<HdHomeRunOptions> options, TunerManager manager, HdHomeRunLineupService lineupService, HdHomeRunSettingsStore settingsStore) =>
 {
     var baseUrl = ResolveBaseUrl(ctx.Request);
     var tuners = manager.GetTuners().ToList();
     var tunerId = tuners.FirstOrDefault()?.Id;
     var lineup = lineupService.BuildLineup(baseUrl, tunerId);
     var opts = options.Value;
+    var settings = settingsStore.GetSettings();
+    var advertisedTuners = settingsStore.ApplyLimit(tuners.Count);
 
     var payload = new
     {
@@ -353,7 +379,9 @@ app.MapGet("/api/integrations/hdhomerun", (HttpContext ctx, IOptions<HdHomeRunOp
         firmwareName = opts.FirmwareName,
         firmwareVersion = opts.FirmwareVersion,
         sourceType = opts.SourceType,
-        tunerCount = tuners.Count,
+        tunerCount = advertisedTuners,
+        physicalTuners = tuners.Count,
+        tunerLimit = settings.TunerLimit,
         channelCount = lineup.Count,
         baseUrl,
         endpoints = new
@@ -363,93 +391,26 @@ app.MapGet("/api/integrations/hdhomerun", (HttpContext ctx, IOptions<HdHomeRunOp
             lineup = $"{baseUrl}/lineup.json",
             lineupPost = $"{baseUrl}/lineup.post",
             streamAny = $"{baseUrl}/api/stream/any"
-        },
-        lineupPreview = lineup
-            .Take(5)
-            .Select(item => new
-            {
-                guideNumber = item.GuideNumber,
-                guideName = item.GuideName,
-                url = item.Url,
-                callSign = item.CallSign,
-                category = item.Category
-            })
-            .ToList()
+        }
     };
 
     return ApiResponse.Ok(payload).ToHttpResult();
 });
 
-app.MapGet("/api/transmitters", (TransmitterDatabase db, int skip = 0, int take = 25) =>
+app.MapGet("/api/integrations/hdhomerun/settings", (HdHomeRunSettingsStore settings) =>
 {
-    skip = Math.Max(0, skip);
-    take = Math.Clamp(take, 1, 100);
-    var slice = db.Transmitters
-        .Skip(skip)
-        .Take(take)
-        .ToList();
-    return ApiResponse.Ok(new
-    {
-        Items = slice,
-        Total = db.Transmitters.Count,
-        Skip = skip,
-        Take = slice.Count
-    }).ToHttpResult();
+    return ApiResponse.Ok(settings.GetSettings()).ToHttpResult();
 });
 
-app.MapPost("/api/transmitters/nearest", (NearestTransmitterRequest request, TransmitterDatabase db) =>
+app.MapPost("/api/integrations/hdhomerun/settings", async (UpdateHdHomeRunSettingsRequest request, HdHomeRunSettingsStore settings) =>
 {
-    if (request == null)
+    if (request is null)
     {
-        return ApiResponse<string>.Fail("Latitude and longitude are required").ToHttpResult();
+        return ApiResponse<string>.Fail("Payload is required").ToHttpResult();
     }
 
-    var nearest = db.Nearest(request.Lat, request.Lon).ToList();
-    var payload = nearest.Select(item => new
-    {
-        item.Tx.SiteName,
-        item.Tx.Region,
-        item.Tx.Postcode,
-        item.Tx.IsRelay,
-        item.Tx.Latitude,
-        item.Tx.Longitude,
-        item.Tx.Muxes,
-        DistanceKm = Math.Round(item.DistanceKm, 2)
-    });
-
-    return ApiResponse.Ok(payload).ToHttpResult();
-});
-
-app.MapPost("/api/transmitters/from-postcode", async (PostcodeLookupRequest request, TransmitterDatabase db, PostcodeLookup lookup) =>
-{
-    if (request == null || string.IsNullOrWhiteSpace(request.Postcode))
-    {
-        return ApiResponse<string>.Fail("Postcode is required").ToHttpResult();
-    }
-
-    var coords = await lookup.LookupAsync(request.Postcode);
-    if (coords == null)
-    {
-        return ApiResponse<string>.Fail("Postcode not found").ToHttpResult();
-    }
-
-    var (lat, lon) = coords.Value;
-    var nearest = db.Nearest(lat, lon, 1).FirstOrDefault();
-    if (nearest.Tx is null)
-    {
-        return ApiResponse<string>.Fail("No transmitters available").ToHttpResult();
-    }
-
-    var response = new
-    {
-        postcode = request.Postcode.Trim(),
-        lat,
-        lon,
-        transmitter = nearest.Tx.SiteName,
-        distanceKm = Math.Round(nearest.DistanceKm, 2)
-    };
-
-    return ApiResponse.Ok(response).ToHttpResult();
+    var updated = await settings.UpdateAsync(request.TunerLimit);
+    return ApiResponse.Ok(updated).ToHttpResult();
 });
 
 app.MapGet("/api/tuner-assignments", (TunerAssignmentManager assignments) =>
@@ -500,25 +461,28 @@ app.MapDelete("/api/tuner-assignments/{tunerId}", async (string tunerId, TunerAs
         : ApiResponse<string>.Fail("Assignment not found").ToHttpResult();
 });
 
+app.MapGet("/api/streams/active", ([FromServices] ActiveStreamManager streams) =>
+{
+    return ApiResponse.Ok(streams.GetActive()).ToHttpResult();
+});
+
+/// <summary>
+/// Builds a base URL for HDHomeRun integrations even when proxied.
+/// </summary>
 static string ResolveBaseUrl(HttpRequest request)
 {
     var host = request.Host.HasValue ? request.Host.Value : "localhost";
     return $"{request.Scheme}://{host}";
 }
 
-static async Task<IResult> StreamFromTunerAsync(ITuner tuner, HttpContext ctx, int? frequency, StreamingOptions streamingOptions, ILogger logger)
+/// <summary>
+/// Streams transport data for a tuner or from the configured override file while tracking active streams.
+/// </summary>
+static async Task<IResult> StreamFromTunerAsync(ITuner tuner, HttpContext ctx, int? frequency, StreamingOptions streamingOptions, ILogger logger, ActiveStreamManager streamManager, string? muxLabel = null)
 {
-    if (!string.IsNullOrWhiteSpace(streamingOptions.TestTransportPath))
+    if (await TryStreamOverrideAsync(ctx, streamingOptions, logger, streamManager, tuner, frequency, muxLabel))
     {
-        var overridePath = ResolveStreamingPath(streamingOptions.TestTransportPath);
-        if (File.Exists(overridePath))
-        {
-            logger.LogInformation("Streaming override active for tuner {TunerId} using {Path}", tuner.Id, overridePath);
-            await StreamFromFileAsync(overridePath, ctx.RequestAborted, ctx.Response, logger);
-            return Results.Empty;
-        }
-
-        logger.LogWarning("Streaming override path {Path} not found; falling back to tuner {TunerId}", overridePath, tuner.Id);
+        return Results.Empty;
     }
 
     if (frequency.HasValue)
@@ -529,17 +493,29 @@ static async Task<IResult> StreamFromTunerAsync(ITuner tuner, HttpContext ctx, i
 
     ctx.Response.StatusCode = 200;
     ctx.Response.ContentType = "video/mp2t";
-    logger.LogInformation("Starting live stream from tuner {TunerId}", tuner.Id);
-    await foreach (var packet in tuner.ReadStreamAsync(ctx.RequestAborted))
+    var clientAddress = ctx.Connection.RemoteIpAddress?.ToString();
+    logger.LogInformation("Starting live stream from tuner {TunerId} for {Client}", tuner.Id, clientAddress ?? "unknown client");
+    var stream = streamManager.Start(tuner.Id, frequency, muxLabel, clientAddress);
+    try
     {
-        await ctx.Response.Body.WriteAsync(packet, ctx.RequestAborted);
-        await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+        await foreach (var packet in tuner.ReadStreamAsync(ctx.RequestAborted))
+        {
+            await ctx.Response.Body.WriteAsync(packet, ctx.RequestAborted);
+            await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+        }
+    }
+    finally
+    {
+        streamManager.End(stream.Id);
+        logger.LogInformation("Stream ended for tuner {TunerId}", tuner.Id);
     }
 
-    logger.LogInformation("Stream ended for tuner {TunerId}", tuner.Id);
     return Results.Empty;
 }
 
+/// <summary>
+/// Streams the specified transport file on loop until the caller cancels the request.
+/// </summary>
 static async Task StreamFromFileAsync(string path, CancellationToken token, HttpResponse response, ILogger logger)
 {
     response.StatusCode = 200;
@@ -559,6 +535,8 @@ static async Task StreamFromFileAsync(string path, CancellationToken token, Http
     logger.LogInformation("File stream for {Path} cancelled", path);
 }
 
+/// Resolves relative paths for streaming assets into absolute paths rooted in the app directory.
+/// </summary>
 static string ResolveStreamingPath(string path)
 {
     if (Path.IsPathRooted(path))
@@ -569,6 +547,9 @@ static string ResolveStreamingPath(string path)
     return Path.GetFullPath(path, AppContext.BaseDirectory);
 }
 
+/// <summary>
+/// Picks a tuner capable of handling the requested frequency while respecting pinned assignments.
+/// </summary>
 static ITuner? SelectTunerForFrequency(TunerManager manager, TunerAssignmentManager assignments, int frequency)
 {
     var pinned = assignments.GetAssignments().FirstOrDefault(a => a.Frequency == frequency);
@@ -593,6 +574,37 @@ static ITuner? SelectTunerForFrequency(TunerManager manager, TunerAssignmentMana
     }
 
     return null;
+}
+
+/// <summary>
+/// Attempts to serve the request using a configured transport stream file instead of a live tuner.
+/// </summary>
+static async Task<bool> TryStreamOverrideAsync(HttpContext ctx, StreamingOptions streamingOptions, ILogger logger, ActiveStreamManager streamManager, ITuner tuner, int? frequency, string? muxLabel)
+{
+    if (string.IsNullOrWhiteSpace(streamingOptions.TestTransportPath))
+    {
+        return false;
+    }
+
+    var overridePath = ResolveStreamingPath(streamingOptions.TestTransportPath);
+    if (!File.Exists(overridePath))
+    {
+        logger.LogWarning("Streaming override path {Path} not found; falling back to tuner {TunerId}", overridePath, tuner.Id);
+        return false;
+    }
+
+    logger.LogInformation("Streaming override active for tuner {TunerId} using {Path}", tuner.Id, overridePath);
+    var record = streamManager.Start(tuner.Id, frequency, muxLabel, ctx.Connection.RemoteIpAddress?.ToString());
+    try
+    {
+        await StreamFromFileAsync(overridePath, ctx.RequestAborted, ctx.Response, logger);
+    }
+    finally
+    {
+        streamManager.End(record.Id);
+    }
+
+    return true;
 }
 
 app.Run();

@@ -1,23 +1,25 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { getChannels, getMuxes, getTuners } from "@/lib/api";
+import { getActiveStreams, getChannels, getMuxes, getTuners } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Channel, Mux, TunerListItem } from "@/lib/types";
+import { ActiveStream, Channel, Mux, TunerListItem } from "@/lib/types";
 import { formatCapabilities } from "@/lib/format";
 
 export default async function Home() {
   let tuners: TunerListItem[] = [];
   let muxes: Mux[] = [];
   let channels: Channel[] = [];
+  let streams: ActiveStream[] = [];
 
   try {
-    [tuners, muxes, channels] = await Promise.all([
+    [tuners, muxes, channels, streams] = await Promise.all([
       getTuners(),
       getMuxes(),
       getChannels(),
+      getActiveStreams(),
     ]);
   } catch (err) {
     return (
@@ -106,6 +108,40 @@ export default async function Home() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Live Streams</CardTitle>
+          <Badge variant="outline">{streams.length}</Badge>
+        </CardHeader>
+        <CardContent>
+          {streams.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No active streams.</p>
+          ) : (
+            <div className="space-y-3">
+              {streams.map((stream) => (
+                <div key={stream.id} className="rounded-md border p-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <div>
+                      <p className="font-medium">{stream.tunerId}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {stream.label ?? "Unlabelled"}
+                      </p>
+                    </div>
+                    <Badge variant="secondary">
+                      {stream.frequency ? `${stream.frequency.toLocaleString()} Hz` : "Override"}
+                    </Badge>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Client: {stream.client ?? "Unknown"}</span>
+                    <span>Started {formatSince(stream.startedAt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Top Channels</CardTitle>
           <Button asChild variant="ghost" size="sm">
             <Link href="/channels">View all</Link>
@@ -133,6 +169,16 @@ export default async function Home() {
       </Card>
     </div>
   );
+}
+
+function formatSince(iso: string) {
+  const started = new Date(iso).getTime();
+  const diffMs = Date.now() - started;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin <= 0) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const hours = (diffMin / 60).toFixed(1);
+  return `${hours}h ago`;
 }
 
 function Header() {
